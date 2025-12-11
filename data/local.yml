@@ -1,0 +1,28 @@
+name: nakama1
+data_dir: "./data/"
+
+logger:
+  level: "info"
+  stdout: true
+  file: ""
+
+console:
+  port: 7351
+  username: "admin"
+  password: "password"
+  signing_key: "defaultkey"
+
+socket:
+  server_key: "defaultkey"
+  port: 7350
+  max_message_size_bytes: 4096
+  read_buffer_size_bytes: 4096
+  write_buffer_size_bytes: 4096
+  ping_period_ms: 15000
+  pong_wait_ms: 25000
+  write_wait_ms: 10000
+
+runtime:
+  env:
+    - "NODE_ENV=development"
+  js_entrypoint: "index.js"
