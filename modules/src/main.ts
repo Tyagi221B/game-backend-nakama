@@ -35,6 +35,10 @@ let InitModule: nkruntime.InitModule = function(
   initializer.registerRpc("get_leaderboard", rpcGetLeaderboard);
   logger.info("RPC 'get_leaderboard' registered");
 
+  // Register RPC function for deleting user data on logout
+  initializer.registerRpc("delete_user_data", rpcDeleteUserData);
+  logger.info("RPC 'delete_user_data' registered");
+
   // Create leaderboards for tracking player stats
   try {
     // Create wins leaderboard with increment operator
@@ -135,5 +139,104 @@ let rpcGetLeaderboard: nkruntime.RpcFunction = function(
   } catch (error) {
     logger.error("Error fetching leaderboard: " + error);
     return JSON.stringify({ leaderboard: [], error: String(error) });
+  }
+};
+
+// RPC function to delete user data (for logout)
+let rpcDeleteUserData: nkruntime.RpcFunction = function(
+  ctx: nkruntime.Context,
+  logger: nkruntime.Logger,
+  nk: nkruntime.Nakama,
+  payload: string
+): string {
+  logger.info("[DELETE] ========================================");
+  logger.info("[DELETE] RPC delete_user_data called by user: " + ctx.userId);
+
+  try {
+    if (!ctx.userId) {
+      logger.error("[DELETE] No user ID in context");
+      return JSON.stringify({ success: false, error: "No user ID" });
+    }
+
+    var userId = ctx.userId;
+
+    // First, check if user has any leaderboard records
+    var leaderboardId = "global_wins";
+    logger.info("[DELETE] Checking leaderboard records for user: " + userId);
+
+    try {
+      var existingRecords = nk.leaderboardRecordsList(leaderboardId, [userId], 1, "", 0);
+      if (existingRecords && existingRecords.records && existingRecords.records.length > 0) {
+        logger.info("[DELETE] Found " + existingRecords.records.length + " leaderboard record(s) for user: " + userId);
+        logger.info("[DELETE] Username in leaderboard: " + existingRecords.records[0].username);
+        logger.info("[DELETE] Score: " + existingRecords.records[0].score);
+      } else {
+        logger.info("[DELETE] No leaderboard records found for user: " + userId);
+      }
+    } catch (error) {
+      logger.warn("[DELETE] Error checking existing records: " + error);
+    }
+
+    // Delete leaderboard records
+    logger.info("[DELETE] Attempting to delete leaderboard records...");
+    try {
+      nk.leaderboardRecordDelete(leaderboardId, userId);
+      logger.info("[DELETE] ✓ Successfully deleted leaderboard records for user: " + userId);
+    } catch (error) {
+      logger.warn("[DELETE] ✗ Failed to delete leaderboard records (might not exist): " + error);
+    }
+
+    // Verify leaderboard deletion
+    logger.info("[DELETE] Verifying leaderboard deletion...");
+    try {
+      var verifyRecords = nk.leaderboardRecordsList(leaderboardId, [userId], 1, "", 0);
+      if (verifyRecords && verifyRecords.records && verifyRecords.records.length > 0) {
+        logger.error("[DELETE] ✗ VERIFICATION FAILED: Records still exist after deletion!");
+      } else {
+        logger.info("[DELETE] ✓ VERIFICATION SUCCESS: No leaderboard records found after deletion");
+      }
+    } catch (error) {
+      logger.warn("[DELETE] Could not verify leaderboard deletion: " + error);
+    }
+
+    // Delete user account from database using SQL
+    logger.info("[DELETE] Attempting to delete user account from database...");
+    try {
+      // Delete from user_device table first (foreign key)
+      var deleteDeviceQuery = "DELETE FROM user_device WHERE user_id = $1";
+      nk.sqlExec(deleteDeviceQuery, [userId]);
+      logger.info("[DELETE] ✓ Deleted user_device records for user: " + userId);
+
+      // Delete from users table
+      var deleteUserQuery = "DELETE FROM users WHERE id = $1";
+      var result = nk.sqlExec(deleteUserQuery, [userId]);
+      logger.info("[DELETE] ✓ Deleted user account from database. Rows affected: " + result.rowsAffected);
+    } catch (error) {
+      logger.error("[DELETE] ✗ Failed to delete user account from database: " + error);
+      return JSON.stringify({ success: false, error: "Failed to delete user account from database" });
+    }
+
+    // Verify user deletion
+    logger.info("[DELETE] Verifying user account deletion...");
+    try {
+      var verifyUserQuery = "SELECT id FROM users WHERE id = $1";
+      var verifyResult = nk.sqlQuery(verifyUserQuery, [userId]);
+      if (verifyResult && verifyResult.length > 0) {
+        logger.error("[DELETE] ✗ VERIFICATION FAILED: User still exists in database after deletion!");
+        return JSON.stringify({ success: false, error: "User deletion verification failed" });
+      } else {
+        logger.info("[DELETE] ✓ VERIFICATION SUCCESS: User account deleted from database");
+      }
+    } catch (error) {
+      logger.warn("[DELETE] Could not verify user deletion: " + error);
+    }
+
+    logger.info("[DELETE] ✓ Successfully completed deletion process for user: " + userId);
+    logger.info("[DELETE] ========================================");
+    return JSON.stringify({ success: true });
+  } catch (error) {
+    logger.error("[DELETE] ✗ Error deleting user data: " + error);
+    logger.info("[DELETE] ========================================");
+    return JSON.stringify({ success: false, error: String(error) });
   }
 };
