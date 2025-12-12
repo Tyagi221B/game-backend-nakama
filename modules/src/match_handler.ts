@@ -417,30 +417,59 @@ function updateLeaderboard(
 ): void {
   try {
     logger.info("[LB] updateLeaderboard called; winner = " + String(state.winner));
-    if (!state.winner || state.winner === "draw") {
-      logger.info("[LB] No winner to update leaderboard for (draw or none).");
+    if (!state.winner) {
+      logger.info("[LB] No winner to update leaderboard for.");
       return;
     }
 
-    // defensive: ensure player exists
-    const player = state.players && state.players[state.winner];
-    if (!player) {
-      logger.error("[LB] Winner id not found in state.players. winner=" + state.winner + " players=" + JSON.stringify(Object.keys(state.players || {})));
+    // If it's a draw, nobody wins or loses
+    if (state.winner === "draw") {
+      logger.info("[LB] Game ended in a draw. No leaderboard updates.");
       return;
     }
 
-    const winnerUsername = player.username || "Unknown";
-    const leaderboardId = "global_wins";
-
-    logger.info(`[LB] Writing leaderboard record: lb=${leaderboardId} owner=${state.winner} username=${winnerUsername} increment=1`);
-
-    try {
-      // Adjust parameters if your nakama-runtime version uses different order; catch errors.
-      nk.leaderboardRecordWrite(leaderboardId, state.winner, winnerUsername, 1, 0);
-      logger.info("[LB] Leaderboard write completed (no exception thrown).");
-    } catch (err) {
-      logger.error("[LB] leaderboardRecordWrite threw: " + String(err));
+    // Get all player IDs
+    var playerIds = Object.keys(state.players);
+    if (playerIds.length !== 2) {
+      logger.warn("[LB] Expected 2 players, found " + playerIds.length);
+      return;
     }
+
+    // Record win for winner
+    const winnerPlayer = state.players[state.winner];
+    if (winnerPlayer) {
+      const winnerUsername = winnerPlayer.username || "Unknown";
+      logger.info(`[LB] Recording WIN: user=${state.winner} username=${winnerUsername}`);
+
+      try {
+        nk.leaderboardRecordWrite("global_wins", state.winner, winnerUsername, 1, 0);
+        logger.info("[LB] Win recorded successfully");
+      } catch (err) {
+        logger.error("[LB] Failed to record win: " + String(err));
+      }
+    }
+
+    // Record loss for loser
+    for (var i = 0; i < playerIds.length; i++) {
+      var playerId = playerIds[i];
+      if (playerId !== state.winner) {
+        const loserPlayer = state.players[playerId];
+        if (loserPlayer) {
+          const loserUsername = loserPlayer.username || "Unknown";
+          logger.info(`[LB] Recording LOSS: user=${playerId} username=${loserUsername}`);
+
+          try {
+            nk.leaderboardRecordWrite("global_losses", playerId, loserUsername, 1, 0);
+            logger.info("[LB] Loss recorded successfully");
+          } catch (err) {
+            logger.error("[LB] Failed to record loss: " + String(err));
+          }
+        }
+        break;
+      }
+    }
+
+    logger.info("[LB] Leaderboard update completed");
   } catch (err) {
     logger.error("[LB] Unexpected error in updateLeaderboard: " + String(err));
   }

@@ -53,7 +53,22 @@ let InitModule: nkruntime.InitModule = function(
     logger.info("Leaderboard 'global_wins' created with increment operator");
   } catch (error) {
     // Leaderboard might already exist from previous runs - that's OK!
-    logger.info("Leaderboard already exists (this is normal on restart)");
+    logger.info("Leaderboard 'global_wins' already exists (this is normal on restart)");
+  }
+
+  try {
+    // Create losses leaderboard with increment operator
+    nk.leaderboardCreate(
+      "global_losses",    // Leaderboard ID
+      false,              // Not authoritative
+      nkruntime.SortOrder.DESCENDING,   // Sort order (highest score first)
+      nkruntime.Operator.INCREMENTAL,   // Operator: increment scores (not replace)
+      "",                 // No reset schedule
+      {}                  // No metadata
+    );
+    logger.info("Leaderboard 'global_losses' created with increment operator");
+  } catch (error) {
+    logger.info("Leaderboard 'global_losses' already exists (this is normal on restart)");
   }
 
   logger.info("Tic-Tac-Toe server module loaded successfully!");
@@ -112,29 +127,70 @@ let rpcGetLeaderboard: nkruntime.RpcFunction = function(
   logger.info("RPC get_leaderboard called");
 
   try {
-    // Fetch top 10 players from the leaderboard
-    var leaderboardId = "global_wins";
-    var records = nk.leaderboardRecordsList(leaderboardId, [], 10, "", 0);
+    // Fetch wins
+    var winsRecords = nk.leaderboardRecordsList("global_wins", [], 100, "", 0);
 
-    // Check if records exist
-    if (!records || !records.records) {
-      logger.info("No leaderboard records found");
-      return JSON.stringify({ leaderboard: [] });
+    // Fetch losses
+    var lossesRecords = nk.leaderboardRecordsList("global_losses", [], 100, "", 0);
+
+    // Create a map to combine wins and losses
+    var playerStats: { [key: string]: any } = {};
+
+    // Process wins
+    if (winsRecords && winsRecords.records) {
+      for (var i = 0; i < winsRecords.records.length; i++) {
+        var record = winsRecords.records[i];
+        playerStats[record.ownerId] = {
+          userId: record.ownerId,
+          username: record.username || "Unknown",
+          wins: record.score,
+          losses: 0
+        };
+      }
     }
 
-    // Format the response
+    // Process losses
+    if (lossesRecords && lossesRecords.records) {
+      for (var j = 0; j < lossesRecords.records.length; j++) {
+        var lossRecord = lossesRecords.records[j];
+        if (playerStats[lossRecord.ownerId]) {
+          playerStats[lossRecord.ownerId].losses = lossRecord.score;
+        } else {
+          playerStats[lossRecord.ownerId] = {
+            userId: lossRecord.ownerId,
+            username: lossRecord.username || "Unknown",
+            wins: 0,
+            losses: lossRecord.score
+          };
+        }
+      }
+    }
+
+    // Convert to array and calculate win rate
     var leaderboard = [];
-    for (var i = 0; i < records.records.length; i++) {
-      var record = records.records[i];
+    for (var userId in playerStats) {
+      var player = playerStats[userId];
+      var totalGames = player.wins + player.losses;
+      var winRate = totalGames > 0 ? (player.wins / totalGames) * 100 : 0;
+
       leaderboard.push({
-        rank: record.rank,
-        username: record.username || "Unknown",
-        score: record.score,
-        userId: record.ownerId
+        userId: player.userId,
+        username: player.username,
+        wins: player.wins,
+        losses: player.losses,
+        winRate: Math.round(winRate * 10) / 10 // Round to 1 decimal
       });
     }
 
-    logger.info("Returning " + leaderboard.length + " leaderboard entries");
+    // Sort by wins (descending)
+    leaderboard.sort(function(a, b) {
+      return b.wins - a.wins;
+    });
+
+    // Take top 10
+    leaderboard = leaderboard.slice(0, 10);
+
+    logger.info("Returning " + leaderboard.length + " leaderboard entries with wins/losses");
     return JSON.stringify({ leaderboard: leaderboard });
   } catch (error) {
     logger.error("Error fetching leaderboard: " + error);
@@ -160,43 +216,22 @@ let rpcDeleteUserData: nkruntime.RpcFunction = function(
 
     var userId = ctx.userId;
 
-    // First, check if user has any leaderboard records
-    var leaderboardId = "global_wins";
-    logger.info("[DELETE] Checking leaderboard records for user: " + userId);
-
+    // Delete wins leaderboard records
+    logger.info("[DELETE] Attempting to delete wins leaderboard records...");
     try {
-      var existingRecords = nk.leaderboardRecordsList(leaderboardId, [userId], 1, "", 0);
-      if (existingRecords && existingRecords.records && existingRecords.records.length > 0) {
-        logger.info("[DELETE] Found " + existingRecords.records.length + " leaderboard record(s) for user: " + userId);
-        logger.info("[DELETE] Username in leaderboard: " + existingRecords.records[0].username);
-        logger.info("[DELETE] Score: " + existingRecords.records[0].score);
-      } else {
-        logger.info("[DELETE] No leaderboard records found for user: " + userId);
-      }
+      nk.leaderboardRecordDelete("global_wins", userId);
+      logger.info("[DELETE] ✓ Successfully deleted wins records for user: " + userId);
     } catch (error) {
-      logger.warn("[DELETE] Error checking existing records: " + error);
+      logger.warn("[DELETE] ✗ Failed to delete wins records (might not exist): " + error);
     }
 
-    // Delete leaderboard records
-    logger.info("[DELETE] Attempting to delete leaderboard records...");
+    // Delete losses leaderboard records
+    logger.info("[DELETE] Attempting to delete losses leaderboard records...");
     try {
-      nk.leaderboardRecordDelete(leaderboardId, userId);
-      logger.info("[DELETE] ✓ Successfully deleted leaderboard records for user: " + userId);
+      nk.leaderboardRecordDelete("global_losses", userId);
+      logger.info("[DELETE] ✓ Successfully deleted losses records for user: " + userId);
     } catch (error) {
-      logger.warn("[DELETE] ✗ Failed to delete leaderboard records (might not exist): " + error);
-    }
-
-    // Verify leaderboard deletion
-    logger.info("[DELETE] Verifying leaderboard deletion...");
-    try {
-      var verifyRecords = nk.leaderboardRecordsList(leaderboardId, [userId], 1, "", 0);
-      if (verifyRecords && verifyRecords.records && verifyRecords.records.length > 0) {
-        logger.error("[DELETE] ✗ VERIFICATION FAILED: Records still exist after deletion!");
-      } else {
-        logger.info("[DELETE] ✓ VERIFICATION SUCCESS: No leaderboard records found after deletion");
-      }
-    } catch (error) {
-      logger.warn("[DELETE] Could not verify leaderboard deletion: " + error);
+      logger.warn("[DELETE] ✗ Failed to delete losses records (might not exist): " + error);
     }
 
     // Delete user account from database using SQL
