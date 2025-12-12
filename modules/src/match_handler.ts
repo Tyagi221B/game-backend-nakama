@@ -10,7 +10,7 @@
 
 // 1. matchInit - Called when match is CREATED (like constructor)
 // Think: new TicTacToeGame()
-let matchInit: nkruntime.MatchInitFunction<GameState> = function(
+let matchInit: nkruntime.MatchInitFunction<GameState> = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -37,7 +37,7 @@ let matchInit: nkruntime.MatchInitFunction<GameState> = function(
 
 // 2. matchJoinAttempt - Check if player CAN join (validation)
 // Think: Express middleware checking authorization
-let matchJoinAttempt: nkruntime.MatchJoinAttemptFunction<GameState> = function(
+let matchJoinAttempt: nkruntime.MatchJoinAttemptFunction<GameState> = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -68,7 +68,7 @@ let matchJoinAttempt: nkruntime.MatchJoinAttemptFunction<GameState> = function(
 
 // 3. matchJoin - Player successfully JOINED (assign X or O)
 // Think: Adding user to game session
-let matchJoin: nkruntime.MatchJoinFunction<GameState> = function(
+let matchJoin: nkruntime.MatchJoinFunction<GameState> = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -125,7 +125,7 @@ let matchJoin: nkruntime.MatchJoinFunction<GameState> = function(
 // 4. matchLoop - THE CORE GAME LOGIC! (most important function!)
 // Runs every server tick, processes player moves
 // Think: Express route handler processing POST /game/move
-let matchLoop: nkruntime.MatchLoopFunction<GameState> = function(
+let matchLoop: nkruntime.MatchLoopFunction<GameState> = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -172,7 +172,7 @@ let matchLoop: nkruntime.MatchLoopFunction<GameState> = function(
 };
 
 // 5. matchLeave - Player DISCONNECTED (handle gracefully)
-let matchLeave: nkruntime.MatchLeaveFunction<GameState> = function(
+let matchLeave: nkruntime.MatchLeaveFunction<GameState> = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -214,7 +214,7 @@ let matchLeave: nkruntime.MatchLeaveFunction<GameState> = function(
 };
 
 // 6. matchTerminate - Match is ENDING (cleanup)
-let matchTerminate: nkruntime.MatchTerminateFunction<GameState> = function(
+let matchTerminate: nkruntime.MatchTerminateFunction<GameState> = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -228,7 +228,7 @@ let matchTerminate: nkruntime.MatchTerminateFunction<GameState> = function(
 };
 
 // 7. matchSignal - Handle external signals (not used for tic-tac-toe, but required by Nakama)
-let matchSignal: nkruntime.MatchSignalFunction<GameState> = function(
+let matchSignal: nkruntime.MatchSignalFunction<GameState> = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -379,21 +379,32 @@ function updateLeaderboard(
   logger: nkruntime.Logger
 ): void {
   try {
-    var leaderboardId = "global_wins";
-
-    // Winner gets +1 win
-    if (state.winner && state.winner !== "draw") {
-      var winnerUsername = state.players[state.winner].username;
-      nk.leaderboardRecordWrite(
-        leaderboardId,
-        state.winner,
-        winnerUsername,
-        1, // score increment
-        0  // subscore
-      );
-      logger.info("=� Leaderboard updated: " + winnerUsername + " +1 win");
+    logger.info("[LB] updateLeaderboard called; winner = " + String(state.winner));
+    if (!state.winner || state.winner === "draw") {
+      logger.info("[LB] No winner to update leaderboard for (draw or none).");
+      return;
     }
-  } catch (error) {
-    logger.error("L Failed to update leaderboard: " + error);
+
+    // defensive: ensure player exists
+    const player = state.players && state.players[state.winner];
+    if (!player) {
+      logger.error("[LB] Winner id not found in state.players. winner=" + state.winner + " players=" + JSON.stringify(Object.keys(state.players || {})));
+      return;
+    }
+
+    const winnerUsername = player.username || "Unknown";
+    const leaderboardId = "global_wins";
+
+    logger.info(`[LB] Writing leaderboard record: lb=${leaderboardId} owner=${state.winner} username=${winnerUsername} increment=1`);
+
+    try {
+      // Adjust parameters if your nakama-runtime version uses different order; catch errors.
+      nk.leaderboardRecordWrite(leaderboardId, state.winner, winnerUsername, 1, 0);
+      logger.info("[LB] Leaderboard write completed (no exception thrown).");
+    } catch (err) {
+      logger.error("[LB] leaderboardRecordWrite threw: " + String(err));
+    }
+  } catch (err) {
+    logger.error("[LB] Unexpected error in updateLeaderboard: " + String(err));
   }
 }

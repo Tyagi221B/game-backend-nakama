@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+modules/build/
+client/build/
+client/dist/
+
+# Ignore ALL server runtime data
+data/
+
+# If you want to be extra specific (optional)
+# server/data/postgres/
+# server/data/.cookie
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
