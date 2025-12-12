@@ -20,6 +20,7 @@ interface GameState {
   status: "waiting" | "active" | "completed";  // Current game phase
   winner: string | null;         // User ID of winner, "draw", or null if game ongoing
   createdAt: number;            // Timestamp when match was created
+  turnStartTimestamp: number | null;  // Timestamp when current turn started (for timeout detection)
 }
 
 // ==================== MESSAGE OPCODES ====================

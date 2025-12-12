@@ -26,6 +26,7 @@ let matchInit: nkruntime.MatchInitFunction<GameState> = function (
     status: "waiting",
     winner: null,
     createdAt: Date.now(),
+    turnStartTimestamp: null,
   };
 
   return {
@@ -81,18 +82,21 @@ let matchJoin: nkruntime.MatchJoinFunction<GameState> = function (
   for (var i = 0; i < presences.length; i++) {
     var presence = presences[i];
 
+    // Normalize username (trim whitespace)
+    var normalizedUsername = presence.username ? presence.username.trim() : "Unknown";
+
     // Assign X or O based on join order
     var playerCount = Object.keys(state.players).length;
     var symbol: "X" | "O" = playerCount === 0 ? "X" : "O";
 
     state.players[presence.userId] = {
-      username: presence.username,
+      username: normalizedUsername,
       symbol: symbol,
       connected: true,
     };
 
     logger.info(
-      "Player " + presence.username + " joined as " + symbol +
+      "Player " + normalizedUsername + " joined as " + symbol +
       ". Total players: " + (playerCount + 1)
     );
   }
@@ -110,10 +114,13 @@ let matchJoin: nkruntime.MatchJoinFunction<GameState> = function (
       }
     }
 
+    // Start the turn timer (30-second countdown)
+    state.turnStartTimestamp = Date.now();
+
     // Close the match - no longer accepting players
     dispatcher.matchLabelUpdate(JSON.stringify({ open: 0 }));
 
-    logger.info("<� Game started! X goes first");
+    logger.info("<� Game started! X goes first. Turn timer started.");
   }
 
   // Broadcast updated state to all players
@@ -165,6 +172,35 @@ let matchLoop: nkruntime.MatchLoopFunction<GameState> = function (
       }
     } catch (error) {
       logger.error("L Error processing message: " + error);
+    }
+  }
+
+  // Check for turn timeout (30 seconds)
+  if (state.status === "active" && state.turnStartTimestamp !== null && state.currentTurn !== null) {
+    var currentTime = Date.now();
+    var timeElapsed = currentTime - state.turnStartTimestamp;
+    var TIMEOUT_MS = 30000; // 30 seconds
+
+    if (timeElapsed >= TIMEOUT_MS) {
+      logger.info("[TIMEOUT] Player " + state.currentTurn + " exceeded 30 seconds. Opponent wins!");
+
+      // Find the opponent (the player who is NOT currentTurn)
+      var playerIds = Object.keys(state.players);
+      for (var k = 0; k < playerIds.length; k++) {
+        if (playerIds[k] !== state.currentTurn) {
+          // Opponent wins by timeout
+          state.winner = playerIds[k];
+          state.status = "completed";
+          logger.info("<� Player " + playerIds[k] + " (" + state.players[playerIds[k]].username + ") wins by timeout!");
+
+          // Update leaderboard
+          updateLeaderboard(nk, state, logger);
+
+          // Broadcast final state
+          broadcastState(dispatcher, state);
+          break;
+        }
+      }
     }
   }
 
@@ -311,7 +347,8 @@ function handleMove(
     for (var j = 0; j < players.length; j++) {
       if (players[j] !== userId) {
         state.currentTurn = players[j];
-        logger.info("= Turn switched to " + state.currentTurn);
+        state.turnStartTimestamp = Date.now();
+        logger.info("= Turn switched to " + state.currentTurn + ". Turn timer reset.");
         break;
       }
     }
