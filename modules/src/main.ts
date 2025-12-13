@@ -1,4 +1,6 @@
 /// <reference path="../node_modules/nakama-runtime/index.d.ts" />
+/// <reference path="types.ts" />
+/// <reference path="match_handler.ts" />
 
 // main.ts - Entry point for Nakama server modules
 // This file is called by Nakama on startup
