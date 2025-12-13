@@ -7,12 +7,14 @@ modules/build/
 client/build/
 client/dist/
 
-# Ignore ALL server runtime data
-data/
+# Ignore ALL server runtime data EXCEPT config file
+data/*
+!data/local.yml
 
-# If you want to be extra specific (optional)
-# server/data/postgres/
-# server/data/.cookie
+# Ignore postgres data and cookies specifically
+data/postgres/
+data/.cookie
+data/modules/
 
 # Environment variables
 .env

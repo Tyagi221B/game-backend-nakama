@@ -21,6 +21,9 @@ socket:
   ping_period_ms: 15000
   pong_wait_ms: 25000
   write_wait_ms: 10000
+  # CORS configuration - Production frontend only
+  allowed_origins:
+    - "https://game.asmittyagi.com"
 
 runtime:
   env:
