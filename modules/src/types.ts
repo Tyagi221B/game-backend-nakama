@@ -3,6 +3,11 @@
 // types.ts - Type definitions and constants for Tic-Tac-Toe game
 // Separating types from logic for better code organization and maintainability
 
+// ==================== GAME MODE ====================
+
+// Game mode types
+type GameMode = "classic" | "timed";
+
 // ==================== GAME STATE ====================
 
 // Game state structure - represents the complete state of a tic-tac-toe match
@@ -19,6 +24,7 @@ interface GameState {
   };
   status: "waiting" | "active" | "completed";  // Current game phase
   winner: string | null;         // User ID of winner, "draw", or null if game ongoing
+  mode: GameMode;                // Game mode: "classic" (no timer) or "timed" (30s per turn)
   createdAt: number;            // Timestamp when match was created
   turnStartTimestamp: number | null;  // Timestamp when current turn started (for timeout detection)
 }

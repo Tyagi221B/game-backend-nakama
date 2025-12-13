@@ -86,12 +86,23 @@ let rpcFindMatch: nkruntime.RpcFunction = function(
 ): string {
   logger.info("RPC find_match called by user: " + ctx.userId);
 
-  // List all active tic-tac-toe matches
+  // Parse mode from payload
+  var data = JSON.parse(payload);
+  var mode: string = data.mode || "timed"; // Default to timed for backwards compatibility
+  logger.info("Finding match with mode: " + mode);
+
+  // Validate mode
+  if (mode !== "classic" && mode !== "timed") {
+    logger.error("Invalid mode: " + mode);
+    throw new Error("Invalid mode. Must be 'classic' or 'timed'");
+  }
+
+  // List all active tic-tac-toe matches with matching mode
   let matches: nkruntime.Match[];
   try {
-    const query = "+label.open:1"; // Only find matches that are open (waiting for players)
+    const query = "+label.open:1 +label.mode:" + mode; // Find open matches with same mode
     matches = nk.matchList(10, true, "", null, 1, query);
-    logger.info("Found " + matches.length + " open matches");
+    logger.info("Found " + matches.length + " open matches for mode: " + mode);
   } catch (error) {
     logger.error("Error listing matches: " + error);
     throw error;
@@ -105,10 +116,10 @@ let rpcFindMatch: nkruntime.RpcFunction = function(
     logger.info("Joining existing match: " + matchId);
   } else {
     // No open matches - create a new one
-    logger.info("No open matches found, creating new match");
+    logger.info("No open matches found, creating new match with mode: " + mode);
     try {
-      matchId = nk.matchCreate("tic_tac_toe", { open: true });
-      logger.info("Created new match: " + matchId);
+      matchId = nk.matchCreate("tic_tac_toe", { open: true, mode: mode });
+      logger.info("Created new match: " + matchId + " with mode: " + mode);
     } catch (error) {
       logger.error("Error creating match: " + error);
       throw error;

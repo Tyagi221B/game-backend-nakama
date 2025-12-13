@@ -16,7 +16,9 @@ let matchInit: nkruntime.MatchInitFunction<GameState> = function (
   nk: nkruntime.Nakama,
   params: { [key: string]: string }
 ) {
-  logger.info("<� New Tic-Tac-Toe match created!");
+  // Get mode from params (sent by matchCreate)
+  var mode: GameMode = (params.mode as GameMode) || "timed";
+  logger.info("<� New Tic-Tac-Toe match created with mode: " + mode);
 
   // Create fresh game state (empty board, no players)
   var state: GameState = {
@@ -25,6 +27,7 @@ let matchInit: nkruntime.MatchInitFunction<GameState> = function (
     players: {},
     status: "waiting",
     winner: null,
+    mode: mode,
     createdAt: Date.now(),
     turnStartTimestamp: null,
   };
@@ -32,7 +35,7 @@ let matchInit: nkruntime.MatchInitFunction<GameState> = function (
   return {
     state: state,
     tickRate: 1, // Server tick rate (1 = process every second)
-    label: JSON.stringify({ open: 1 }),   // Mark match as open for matchmaking
+    label: JSON.stringify({ open: 1, mode: mode }),   // Mark match as open with mode for matchmaking
   };
 };
 
@@ -114,13 +117,17 @@ let matchJoin: nkruntime.MatchJoinFunction<GameState> = function (
       }
     }
 
-    // Start the turn timer (30-second countdown)
-    state.turnStartTimestamp = Date.now();
+    // Start the turn timer only for timed mode
+    if (state.mode === "timed") {
+      state.turnStartTimestamp = Date.now();
+      logger.info("<� Game started! X goes first. Turn timer started (30s per turn).");
+    } else {
+      state.turnStartTimestamp = null;
+      logger.info("<� Game started! X goes first. Classic mode (no timer).");
+    }
 
     // Close the match - no longer accepting players
-    dispatcher.matchLabelUpdate(JSON.stringify({ open: 0 }));
-
-    logger.info("<� Game started! X goes first. Turn timer started.");
+    dispatcher.matchLabelUpdate(JSON.stringify({ open: 0, mode: state.mode }));
   }
 
   // Broadcast updated state to all players
@@ -175,8 +182,8 @@ let matchLoop: nkruntime.MatchLoopFunction<GameState> = function (
     }
   }
 
-  // Check for turn timeout (30 seconds)
-  if (state.status === "active" && state.turnStartTimestamp !== null && state.currentTurn !== null) {
+  // Check for turn timeout (30 seconds) - only for timed mode
+  if (state.mode === "timed" && state.status === "active" && state.turnStartTimestamp !== null && state.currentTurn !== null) {
     var currentTime = Date.now();
     var timeElapsed = currentTime - state.turnStartTimestamp;
     var TIMEOUT_MS = 30000; // 30 seconds
@@ -221,23 +228,33 @@ let matchLeave: nkruntime.MatchLeaveFunction<GameState> = function (
     var presence = presences[i];
     logger.info("=K Player " + presence.username + " left the match");
 
-    if (state.players[presence.userId]) {
-      state.players[presence.userId].connected = false;
-    }
+    // EDGE CASE FIX: If game is still waiting for players, completely remove them
+    // This prevents ghost players from blocking new players who join later
+    if (state.status === "waiting") {
+      if (state.players[presence.userId]) {
+        delete state.players[presence.userId];
+        logger.info("✓ Player removed from waiting match (cancelled matchmaking)");
+      }
+    } else {
+      // Game is active - mark as disconnected (keep for leaderboard)
+      if (state.players[presence.userId]) {
+        state.players[presence.userId].connected = false;
+      }
 
-    // If game is active and someone left, other player wins by forfeit
-    if (state.status === "active") {
-      var playerIds = Object.keys(state.players);
-      for (var j = 0; j < playerIds.length; j++) {
-        var playerId = playerIds[j];
-        if (playerId !== presence.userId && state.players[playerId].connected) {
-          state.status = "completed";
-          state.winner = playerId;
-          logger.info("<� Player " + playerId + " wins by forfeit");
+      // If game is active and someone left, other player wins by forfeit
+      if (state.status === "active") {
+        var playerIds = Object.keys(state.players);
+        for (var j = 0; j < playerIds.length; j++) {
+          var playerId = playerIds[j];
+          if (playerId !== presence.userId && state.players[playerId].connected) {
+            state.status = "completed";
+            state.winner = playerId;
+            logger.info("<� Player " + playerId + " wins by forfeit");
 
-          // Update leaderboard
-          updateLeaderboard(nk, state, logger);
-          break;
+            // Update leaderboard
+            updateLeaderboard(nk, state, logger);
+            break;
+          }
         }
       }
     }
@@ -347,8 +364,14 @@ function handleMove(
     for (var j = 0; j < players.length; j++) {
       if (players[j] !== userId) {
         state.currentTurn = players[j];
-        state.turnStartTimestamp = Date.now();
-        logger.info("= Turn switched to " + state.currentTurn + ". Turn timer reset.");
+
+        // Reset timer only for timed mode
+        if (state.mode === "timed") {
+          state.turnStartTimestamp = Date.now();
+          logger.info("= Turn switched to " + state.currentTurn + ". Turn timer reset.");
+        } else {
+          logger.info("= Turn switched to " + state.currentTurn + ".");
+        }
         break;
       }
     }
