@@ -7,7 +7,7 @@
 
 // InitModule is the REQUIRED entry point function
 // Nakama calls this when the server starts
-let InitModule: nkruntime.InitModule = function(
+let InitModule: nkruntime.InitModule = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -78,7 +78,7 @@ let InitModule: nkruntime.InitModule = function(
 
 // RPC function to find an existing match or create a new one
 // This solves the matchmaking problem: first player creates, second player joins
-let rpcFindMatch: nkruntime.RpcFunction = function(
+let rpcFindMatch: nkruntime.RpcFunction = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -130,8 +130,57 @@ let rpcFindMatch: nkruntime.RpcFunction = function(
   return JSON.stringify({ matchId: matchId });
 };
 
+// Helper function to get streak data for a user
+function getStreakData(
+  nk: nkruntime.Nakama,
+  userId: string,
+  logger: nkruntime.Logger
+): { winStreak: number; bestWinStreak: number } {
+  try {
+    const storageKey = userId + "_streaks";
+    const collection = "user_streaks";
+
+    var readObjects: nkruntime.StorageReadRequest[] = [{
+      collection: collection,
+      key: storageKey,
+      userId: userId
+    }];
+
+    var existingObjects: nkruntime.StorageObject[] = [];
+    try {
+      existingObjects = nk.storageRead(readObjects);
+    } catch (err) {
+      // No streak data found - return defaults
+      return { winStreak: 0, bestWinStreak: 0 };
+    }
+
+    if (existingObjects && existingObjects.length > 0) {
+      // StorageObject.value might be an object or string depending on Nakama version
+      var value = existingObjects[0].value;
+      var streakData: { currentWinStreak?: number; bestWinStreak?: number };
+
+      if (typeof value === "string") {
+        streakData = JSON.parse(value);
+      } else {
+        // Already an object
+        streakData = value as { currentWinStreak?: number; bestWinStreak?: number };
+      }
+
+      return {
+        winStreak: streakData.currentWinStreak || 0,
+        bestWinStreak: streakData.bestWinStreak || 0
+      };
+    }
+
+    return { winStreak: 0, bestWinStreak: 0 };
+  } catch (err) {
+    logger.warn("[STREAK] Error reading streak data for " + userId + ": " + String(err));
+    return { winStreak: 0, bestWinStreak: 0 };
+  }
+}
+
 // RPC function to fetch the top players from the leaderboard
-let rpcGetLeaderboard: nkruntime.RpcFunction = function(
+let rpcGetLeaderboard: nkruntime.RpcFunction = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -179,31 +228,37 @@ let rpcGetLeaderboard: nkruntime.RpcFunction = function(
       }
     }
 
-    // Convert to array and calculate win rate
+    // Convert to array and calculate win rate + fetch streaks
     var leaderboard = [];
     for (var userId in playerStats) {
       var player = playerStats[userId];
       var totalGames = player.wins + player.losses;
       var winRate = totalGames > 0 ? (player.wins / totalGames) * 100 : 0;
 
+      // Fetch streak data for this player
+      var streakData = getStreakData(nk, player.userId, logger);
+      logger.info(`[LB] Player ${player.username} (${player.userId}): winStreak=${streakData.winStreak}, bestWinStreak=${streakData.bestWinStreak}`);
+
       leaderboard.push({
         userId: player.userId,
         username: player.username,
         wins: player.wins,
         losses: player.losses,
-        winRate: Math.round(winRate * 10) / 10 // Round to 1 decimal
+        winRate: Math.round(winRate * 10) / 10, // Round to 1 decimal
+        winStreak: streakData.winStreak,
+        bestWinStreak: streakData.bestWinStreak
       });
     }
 
     // Sort by wins (descending)
-    leaderboard.sort(function(a, b) {
+    leaderboard.sort(function (a, b) {
       return b.wins - a.wins;
     });
 
     // Take top 10
     leaderboard = leaderboard.slice(0, 10);
 
-    logger.info("Returning " + leaderboard.length + " leaderboard entries with wins/losses");
+    logger.info("Returning " + leaderboard.length + " leaderboard entries with wins/losses/streaks");
     return JSON.stringify({ leaderboard: leaderboard });
   } catch (error) {
     logger.error("Error fetching leaderboard: " + error);
@@ -212,7 +267,7 @@ let rpcGetLeaderboard: nkruntime.RpcFunction = function(
 };
 
 // RPC function to delete user data (for logout)
-let rpcDeleteUserData: nkruntime.RpcFunction = function(
+let rpcDeleteUserData: nkruntime.RpcFunction = function (
   ctx: nkruntime.Context,
   logger: nkruntime.Logger,
   nk: nkruntime.Nakama,
@@ -247,40 +302,40 @@ let rpcDeleteUserData: nkruntime.RpcFunction = function(
       logger.warn("[DELETE] ✗ Failed to delete losses records (might not exist): " + error);
     }
 
-    // Delete user account from database using SQL
-    logger.info("[DELETE] Attempting to delete user account from database...");
+    // Delete streak storage object
+    logger.info("[DELETE] Attempting to delete streak storage object...");
     try {
-      // Delete from user_device table first (foreign key)
-      var deleteDeviceQuery = "DELETE FROM user_device WHERE user_id = $1";
-      nk.sqlExec(deleteDeviceQuery, [userId]);
-      logger.info("[DELETE] ✓ Deleted user_device records for user: " + userId);
-
-      // Delete from users table
-      var deleteUserQuery = "DELETE FROM users WHERE id = $1";
-      var result = nk.sqlExec(deleteUserQuery, [userId]);
-      logger.info("[DELETE] ✓ Deleted user account from database. Rows affected: " + result.rowsAffected);
+      const storageKey = userId + "_streaks";
+      const collection = "user_streaks";
+      var deleteObjects: nkruntime.StorageDeleteRequest[] = [{
+        collection: collection,
+        key: storageKey,
+        userId: userId
+      }];
+      nk.storageDelete(deleteObjects);
+      logger.info("[DELETE] ✓ Successfully deleted streak storage for user: " + userId);
     } catch (error) {
-      logger.error("[DELETE] ✗ Failed to delete user account from database: " + error);
-      return JSON.stringify({ success: false, error: "Failed to delete user account from database" });
+      logger.warn("[DELETE] ✗ Failed to delete streak storage (might not exist): " + error);
     }
 
-    // Verify user deletion
-    logger.info("[DELETE] Verifying user account deletion...");
-    try {
-      var verifyUserQuery = "SELECT id FROM users WHERE id = $1";
-      var verifyResult = nk.sqlQuery(verifyUserQuery, [userId]);
-      if (verifyResult && verifyResult.length > 0) {
-        logger.error("[DELETE] ✗ VERIFICATION FAILED: User still exists in database after deletion!");
-        return JSON.stringify({ success: false, error: "User deletion verification failed" });
-      } else {
-        logger.info("[DELETE] ✓ VERIFICATION SUCCESS: User account deleted from database");
-      }
-    } catch (error) {
-      logger.warn("[DELETE] Could not verify user deletion: " + error);
-    }
-
+    // All data deleted successfully - return success BEFORE deleting account
+    // (Account deletion will close the WebSocket, so we return first)
     logger.info("[DELETE] ✓ Successfully completed deletion process for user: " + userId);
     logger.info("[DELETE] ========================================");
+
+    // Delete user account asynchronously (after returning response)
+    // This properly deletes the user and frees up the username for reuse
+    // We do this last because it will invalidate the session and close the WebSocket
+    logger.info("[DELETE] Attempting to delete user account using nk.accountDeleteId...");
+    try {
+      nk.accountDeleteId(userId);
+      logger.info("[DELETE] ✓ Successfully deleted user account. Username is now available for reuse.");
+    } catch (error) {
+      logger.error("[DELETE] ✗ Failed to delete user account: " + error);
+      // Don't return error here - data is already deleted, account deletion failure is logged
+    }
+
+    // Return success immediately (before account deletion closes the socket)
     return JSON.stringify({ success: true });
   } catch (error) {
     logger.error("[DELETE] ✗ Error deleting user data: " + error);

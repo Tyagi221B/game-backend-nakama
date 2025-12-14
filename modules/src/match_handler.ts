@@ -233,7 +233,7 @@ let matchLeave: nkruntime.MatchLeaveFunction<GameState> = function (
     if (state.status === "waiting") {
       if (state.players[presence.userId]) {
         delete state.players[presence.userId];
-        logger.info("✓ Player removed from waiting match (cancelled matchmaking)");
+        logger.info("? Player removed from waiting match (cancelled matchmaking)");
       }
     } else {
       // Game is active - mark as disconnected (keep for leaderboard)
@@ -432,6 +432,91 @@ function broadcastState(dispatcher: nkruntime.MatchDispatcher, state: GameState)
   dispatcher.broadcastMessage(OpCode.STATE_UPDATE, stateJson);
 }
 
+// Update win streaks for a player
+// result: "win" | "loss" | "draw"
+function updateWinStreaks(
+  nk: nkruntime.Nakama,
+  userId: string,
+  result: "win" | "loss" | "draw",
+  logger: nkruntime.Logger
+): void {
+  try {
+    const storageKey = userId + "_streaks";
+    const collection = "user_streaks";
+
+    // Try to read existing streak data
+    var readObjects: nkruntime.StorageReadRequest[] = [{
+      collection: collection,
+      key: storageKey,
+      userId: userId
+    }];
+
+    var existingObjects: nkruntime.StorageObject[] = [];
+    try {
+      existingObjects = nk.storageRead(readObjects);
+    } catch (err) {
+      logger.info("[STREAK] No existing streak data found for user " + userId + ", initializing");
+    }
+
+    // Get current streak values (default to 0 if not found)
+    var currentWinStreak = 0;
+    var bestWinStreak = 0;
+
+    if (existingObjects && existingObjects.length > 0) {
+      // StorageObject.value might be an object or string depending on Nakama version
+      var value = existingObjects[0].value;
+      var existingData: { currentWinStreak?: number; bestWinStreak?: number };
+
+      if (typeof value === "string") {
+        existingData = JSON.parse(value);
+      } else {
+        // Already an object
+        existingData = value as { currentWinStreak?: number; bestWinStreak?: number };
+      }
+
+      currentWinStreak = existingData.currentWinStreak || 0;
+      bestWinStreak = existingData.bestWinStreak || 0;
+    }
+
+    // Update streaks based on result
+    if (result === "win") {
+      currentWinStreak = currentWinStreak + 1;
+      if (currentWinStreak > bestWinStreak) {
+        bestWinStreak = currentWinStreak;
+        logger.info(`[STREAK] New best win streak for ${userId}: ${bestWinStreak}`);
+      }
+      logger.info(`[STREAK] Win streak updated for ${userId}: ${currentWinStreak} (Best: ${bestWinStreak})`);
+    } else {
+      // Loss or draw - reset current streak
+      if (currentWinStreak > 0) {
+        logger.info(`[STREAK] Streak ended for ${userId} at ${currentWinStreak} (Best: ${bestWinStreak})`);
+      }
+      currentWinStreak = 0;
+    }
+
+    // Write updated streak data back to storage
+    var streakData = {
+      currentWinStreak: currentWinStreak,
+      bestWinStreak: bestWinStreak
+    };
+
+    var writeObjects: nkruntime.StorageWriteRequest[] = [{
+      collection: collection,
+      key: storageKey,
+      userId: userId,
+      value: streakData as any, // Nakama storage accepts object or string
+      permissionRead: 1, // Public read
+      permissionWrite: 0  // Only server can write
+    }];
+
+    nk.storageWrite(writeObjects);
+    logger.info(`[STREAK] Streak data saved for ${userId}`);
+  } catch (err) {
+    logger.error("[STREAK] Error updating win streaks: " + String(err));
+    // Don't throw - streaks are nice-to-have, don't break the game
+  }
+}
+
 // Update leaderboard with game results
 function updateLeaderboard(
   nk: nkruntime.Nakama,
@@ -445,16 +530,19 @@ function updateLeaderboard(
       return;
     }
 
-    // If it's a draw, nobody wins or loses
-    if (state.winner === "draw") {
-      logger.info("[LB] Game ended in a draw. No leaderboard updates.");
-      return;
-    }
-
     // Get all player IDs
     var playerIds = Object.keys(state.players);
     if (playerIds.length !== 2) {
       logger.warn("[LB] Expected 2 players, found " + playerIds.length);
+      return;
+    }
+
+    // If it's a draw, reset streaks for both players (no wins/losses recorded)
+    if (state.winner === "draw") {
+      logger.info("[LB] Game ended in a draw. Resetting streaks for both players.");
+      for (var d = 0; d < playerIds.length; d++) {
+        updateWinStreaks(nk, playerIds[d], "draw", logger);
+      }
       return;
     }
 
@@ -470,6 +558,9 @@ function updateLeaderboard(
       } catch (err) {
         logger.error("[LB] Failed to record win: " + String(err));
       }
+
+      // Update win streak for winner
+      updateWinStreaks(nk, state.winner, "win", logger);
     }
 
     // Record loss for loser
@@ -487,6 +578,9 @@ function updateLeaderboard(
           } catch (err) {
             logger.error("[LB] Failed to record loss: " + String(err));
           }
+
+          // Reset win streak for loser
+          updateWinStreaks(nk, playerId, "loss", logger);
         }
         break;
       }
