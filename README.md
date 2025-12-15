@@ -6,22 +6,24 @@ A production-ready, server-authoritative multiplayer Tic-Tac-Toe game built with
 
 - **Frontend:** https://game.asmittyagi.com
 - **Backend API:** https://api.asmittyagi.com
-- **Admin Console:** https://api.asmittyagi.com:7351 (username: `admin`, password: `password`)
 
 ## Tech Stack
 
 ### Backend
+
 - **Nakama 3.22.0** - Open-source game server (handles authentication, matchmaking, real-time communication)
 - **PostgreSQL 16** - Database for persistent storage (user data, leaderboards)
 - **TypeScript** - Server-side game logic
 - **Docker & Docker Compose** - Containerization and orchestration
 
 ### Infrastructure
+
 - **DigitalOcean Droplet** - Ubuntu 24.04 LTS server
 - **Nginx** - Reverse proxy with SSL termination
 - **Let's Encrypt** - Free SSL certificates
 
 ### Frontend Repository
+
 - Frontend code is in a separate repository
 - Built with React + TypeScript + Vite
 - Deployed on Vercel
@@ -32,6 +34,7 @@ A production-ready, server-authoritative multiplayer Tic-Tac-Toe game built with
 ### Core Requirements (All Implemented)
 
 #### Server-Authoritative Game Logic
+
 - All game state managed on the server
 - 4-layer move validation system:
   1. Game must be active
@@ -43,6 +46,7 @@ A production-ready, server-authoritative multiplayer Tic-Tac-Toe game built with
 - Broadcast validated state updates to all clients
 
 #### Matchmaking System
+
 - Automatic player pairing
 - Find existing match or create new one
 - Queue-based matchmaking with `+label.open:1` query
@@ -50,6 +54,7 @@ A production-ready, server-authoritative multiplayer Tic-Tac-Toe game built with
 - Forfeit system on disconnect
 
 #### Real-time Multiplayer
+
 - WebSocket-based real-time communication
 - Instant move synchronization
 - Live turn indicators
@@ -58,6 +63,7 @@ A production-ready, server-authoritative multiplayer Tic-Tac-Toe game built with
 ### Bonus Features (All Implemented)
 
 #### Leaderboard System
+
 - Track player wins, losses, and win rate
 - Global ranking system (top 10 players)
 - Incremental leaderboard updates
@@ -65,6 +71,7 @@ A production-ready, server-authoritative multiplayer Tic-Tac-Toe game built with
 - Real-time leaderboard refresh after game completion
 
 #### Timer-Based Game Mode
+
 - 30-second turn timer
 - Countdown display in UI
 - Automatic forfeit on timeout
@@ -72,16 +79,28 @@ A production-ready, server-authoritative multiplayer Tic-Tac-Toe game built with
 - Timer resets on each turn
 
 #### Concurrent Game Support
+
 - Multiple simultaneous game sessions
 - Proper game room isolation
 - Scalable architecture for concurrent players
 - Each match has independent state
+
+#### Win Streaks System
+
+- Track current win streak for each player
+- Track best (all-time) win streak for each player
+- Streaks reset on loss or draw
+- Streaks increment on win
+- Display streaks in leaderboard and game results
+- Persistent storage using Nakama storage objects
+- Milestone celebrations for streak achievements
 
 ## Architecture & Design Decisions
 
 ### Why Server-Authoritative?
 
 In multiplayer games, there are two main approaches:
+
 1. **Client-Authoritative** - Client sends "I moved here", server accepts it (vulnerable to cheating)
 2. **Server-Authoritative** - Client sends "I want to move here", server validates and decides
 
@@ -123,6 +142,7 @@ if (state.board[position] !== null) return state;
 ```
 
 **Security Benefits:**
+
 - Client cannot manipulate game state directly
 - Client cannot move out of turn
 - Client cannot place on occupied cells
@@ -132,28 +152,62 @@ if (state.board[position] !== null) return state;
 ### Why Nakama?
 
 Nakama provides production-ready features out of the box:
+
 - Built-in authentication (device ID, custom, social)
 - WebSocket connections with automatic reconnection
 - Match system with state synchronization
 - Leaderboards with atomic operations
+- Storage objects for persistent per-user data (streaks)
 - Scalable real-time infrastructure
 - Battle-tested in production games
+
+### Win Streaks Implementation
+
+Win streaks are implemented using Nakama's storage objects system:
+
+**Storage Structure:**
+
+- Collection: `user_streaks`
+- Key: `{userId}_streaks`
+- Value: `{ currentWinStreak: number, bestWinStreak: number }`
+
+**Update Logic:**
+
+- **On Win:** Increment `currentWinStreak`, update `bestWinStreak` if new record
+- **On Loss/Draw:** Reset `currentWinStreak` to 0, keep `bestWinStreak` unchanged
+- **Storage:** Persisted immediately after each game completion
+
+**Integration:**
+
+- Streaks updated in `updateLeaderboard()` function after game ends
+- Streak data retrieved in `get_leaderboard` RPC for display
+- Client displays streaks in leaderboard and game results screens
+
+**Benefits:**
+
+- Persistent across sessions
+- Efficient key-value storage
+- No additional database tables needed
+- Atomic updates prevent race conditions
 
 ### Tech Stack Choices
 
 **TypeScript for Server Logic:**
+
 - Type safety prevents runtime errors
 - Better IDE support and autocomplete
 - Easier to maintain and refactor
 - Compiles to JavaScript for Nakama runtime
 
 **Docker Compose:**
+
 - Consistent development and production environments
 - Easy to set up PostgreSQL + Nakama
 - One command to start entire stack
 - Portable across machines
 
 **Nginx + SSL:**
+
 - Required for HTTPS (browsers block mixed content)
 - WebSocket support with proper upgrade headers
 - Reverse proxy for clean architecture
@@ -179,11 +233,14 @@ game-backend-nakama/
 ### Key Files
 
 **`modules/src/main.ts`** - Nakama initialization
+
 - Register match handler for Tic-Tac-Toe
 - Register RPCs: `find_match`, `get_leaderboard`, `delete_user_data`
 - Create leaderboards: `global_wins`, `global_losses`
+- `getStreakData` - Helper function to retrieve user streak data from storage
 
-**`modules/src/match_handler.ts`** - Core game logic (476 lines)
+**`modules/src/match_handler.ts`** - Core game logic (593 lines)
+
 - `matchInit` - Create empty game state
 - `matchJoinAttempt` - Validate player can join (max 2 players)
 - `matchJoin` - Assign X or O, start game when 2 players present
@@ -191,9 +248,11 @@ game-backend-nakama/
 - `matchLeave` - Handle disconnections, award forfeit
 - `handleMove` - 4-layer validation + winner detection
 - `checkWinner` - Check 8 winning combinations + draw
-- `updateLeaderboard` - Increment wins/losses
+- `updateLeaderboard` - Increment wins/losses and update streaks
+- `updateWinStreaks` - Update current and best win streaks using Nakama storage objects
 
 **`data/local.yml`** - Nakama configuration
+
 - Socket settings (port 7350, WebSocket support)
 - CORS configuration (allow frontend domain)
 - Runtime settings (JavaScript entrypoint)
@@ -209,12 +268,14 @@ game-backend-nakama/
 ### Local Development Setup
 
 1. **Clone the repository**
+
 ```bash
 git clone <your-repo-url>
 cd game-backend-nakama
 ```
 
 2. **Install dependencies and build TypeScript modules**
+
 ```bash
 cd modules
 npm install
@@ -223,16 +284,19 @@ cd ..
 ```
 
 3. **Start Nakama + PostgreSQL**
+
 ```bash
 docker-compose up
 ```
 
 You should see:
+
 ```
 ✅ Tic-Tac-Toe server module loaded successfully!
 ```
 
 4. **Verify it's running**
+
 ```bash
 # Health check
 curl http://localhost:7350/v2/healthcheck
@@ -243,6 +307,7 @@ open http://localhost:7351
 ```
 
 5. **Run the frontend** (separate repository)
+
 ```bash
 # Set environment variables
 VITE_NAKAMA_HOST=localhost
@@ -285,11 +350,13 @@ rm -rf data/postgres
 #### 2. Initial Server Setup
 
 SSH into droplet:
+
 ```bash
 ssh root@YOUR_DROPLET_IP
 ```
 
 Install dependencies:
+
 ```bash
 # Update system
 apt update && apt upgrade -y
@@ -331,6 +398,7 @@ docker-compose logs nakama | grep "successfully"
 #### 4. Configure DNS
 
 Add A record in your DNS provider:
+
 ```
 Type: A
 Name: api
@@ -339,6 +407,7 @@ TTL: Auto
 ```
 
 Wait 2-5 minutes for propagation. Test:
+
 ```bash
 ping api.yourdomain.com
 ```
@@ -353,6 +422,7 @@ certbot certonly --standalone -d api.yourdomain.com --non-interactive --agree-to
 #### 6. Configure Nginx
 
 Create `/etc/nginx/sites-available/nakama`:
+
 ```nginx
 map $http_upgrade $connection_upgrade {
     default upgrade;
@@ -365,6 +435,10 @@ upstream nakama_http {
 
 upstream nakama_grpc {
     server 127.0.0.1:7349;
+}
+
+upstream nakama_console {
+    server 127.0.0.1:7351;
 }
 
 server {
@@ -380,7 +454,22 @@ server {
     ssl_certificate /etc/letsencrypt/live/api.yourdomain.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/api.yourdomain.com/privkey.pem;
 
-    # HTTP + WebSocket
+    # Nakama Console (Admin Dashboard)
+    location /console {
+        proxy_pass http://nakama_console;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket support for console
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+
+    # HTTP + WebSocket (Nakama API)
     location / {
         proxy_pass http://nakama_http;
         proxy_http_version 1.1;
@@ -408,7 +497,14 @@ server {
 }
 ```
 
+**Note:** The console is now accessible at `https://api.yourdomain.com/console` instead of `https://api.yourdomain.com:7351`. This provides:
+
+- SSL encryption for the admin dashboard
+- No need to expose port 7351 publicly
+- Better security (console behind reverse proxy)
+
 Enable and start:
+
 ```bash
 ln -s /etc/nginx/sites-available/nakama /etc/nginx/sites-enabled/
 nginx -t
@@ -439,12 +535,14 @@ Should return JSON with server info.
 1. **Push frontend code to GitHub**
 
 2. **Connect to Vercel**
+
    - Import repository
    - Framework: Vite
    - Build command: `npm run build`
    - Output directory: `dist`
 
 3. **Set Environment Variables**
+
    ```
    VITE_NAKAMA_HOST=api.yourdomain.com
    VITE_NAKAMA_PORT=443
@@ -458,11 +556,11 @@ Should return JSON with server info.
 
 ### Environment Variables (Frontend)
 
-| Variable | Value | Description |
-|----------|-------|-------------|
-| `VITE_NAKAMA_HOST` | `api.yourdomain.com` | Backend domain (no http/https) |
-| `VITE_NAKAMA_PORT` | `443` | HTTPS port (7350 for local dev) |
-| `VITE_NAKAMA_SSL` | `true` | Use SSL (false for local dev) |
+| Variable           | Value                | Description                     |
+| ------------------ | -------------------- | ------------------------------- |
+| `VITE_NAKAMA_HOST` | `api.yourdomain.com` | Backend domain (no http/https)  |
+| `VITE_NAKAMA_PORT` | `443`                | HTTPS port (7350 for local dev) |
+| `VITE_NAKAMA_SSL`  | `true`               | Use SSL (false for local dev)   |
 
 ### Nakama Configuration (`data/local.yml`)
 
@@ -470,35 +568,40 @@ Should return JSON with server info.
 socket:
   port: 7350
   allowed_origins:
-    - "https://game.yourdomain.com"  # Frontend URL
+    - "https://game.yourdomain.com" # Frontend URL
 ```
 
 **CORS Setup:** Whitelist your frontend domain to allow WebSocket connections.
 
 ### Docker Compose Ports
 
-| Port | Service | Description |
-|------|---------|-------------|
-| 5432 | PostgreSQL | Database |
-| 7349 | Nakama gRPC | gRPC API (for SDKs) |
-| 7350 | Nakama HTTP | REST API + WebSocket |
-| 7351 | Nakama Console | Admin dashboard |
+| Port | Service        | Description          | Public Access            |
+| ---- | -------------- | -------------------- | ------------------------ |
+| 5432 | PostgreSQL     | Database             | No (internal only)       |
+| 7349 | Nakama gRPC    | gRPC API (for SDKs)  | Yes (via Nginx /grpc)    |
+| 7350 | Nakama HTTP    | REST API + WebSocket | Yes (via Nginx /)        |
+| 7351 | Nakama Console | Admin dashboard      | Yes (via Nginx /console) |
+
+**Note:** In production, ports 7349, 7350, and 7351 are not directly exposed. All access goes through Nginx on port 443 (HTTPS).
 
 ## Testing Multiplayer Functionality
 
 ### Manual Testing
 
 1. **Open browser 1** - Go to your frontend URL
+
    - Enter username "Alice"
    - Click "Find Match"
    - Should show "Finding a random player..."
 
 2. **Open browser 2 (incognito)** - Same URL
+
    - Enter username "Bob"
    - Click "Find Match"
    - **Game should start immediately!**
 
 3. **Play the game**
+
    - Alice sees X, Bob sees O
    - Take turns clicking cells
    - 30-second timer appears for current player
@@ -510,15 +613,19 @@ socket:
    - Winner gets +1 win
    - Loser gets +1 loss
    - Win rate updates automatically
+   - Win streaks displayed for each player
+   - Best win streak tracked and shown
 
 ### Expected Behavior
 
 **Matchmaking:**
+
 - First player creates a match and waits
 - Second player joins the existing match
 - Game starts when 2 players are present
 
 **Gameplay:**
+
 - X always goes first
 - Current player has green "YOUR TURN" indicator
 - Opponent sees amber "THINKING" indicator
@@ -526,12 +633,16 @@ socket:
 - Can only click on empty cells during your turn
 
 **Game End:**
+
 - Victory/defeat modal appears
+- Current win streak and best win streak displayed
+- Milestone celebrations for streak achievements
 - Leaderboard updates within 1-2 seconds
 - "Play Again" button finds new match
-- "Back to Home" reloads page
+- "Back to Home" returns to matchmaking without reload
 
 **Disconnection:**
+
 - If player leaves during game, opponent wins by forfeit
 - Connection status indicator shows in top-left
 
@@ -542,12 +653,16 @@ socket:
 3. **Timeout:** Player exceeds 30 seconds, opponent wins
 4. **Forfeit:** Player disconnects, opponent wins
 5. **Reconnection:** Network drops, auto-reconnects
+6. **Win Streaks:** Win multiple games in a row, verify streak increments
+7. **Streak Reset:** Lose or draw, verify streak resets to 0
+8. **Best Streak:** Achieve new best streak, verify it's saved and displayed
 
 ## API Endpoints
 
 ### REST API (via Nakama)
 
 **Authentication:**
+
 ```
 POST /v2/account/authenticate/device
 Body: { username: "alice" }
@@ -555,31 +670,44 @@ Response: { token: "..." }
 ```
 
 **RPCs (custom server functions):**
+
 ```
 POST /v2/rpc/find_match
+  - Finds or creates a match for the player
+  - Returns: { matchId: "..." }
+
 POST /v2/rpc/get_leaderboard
+  - Returns top 10 players with wins, losses, win rate, and streaks
+  - Returns: [{ username, wins, losses, winRate, winStreak, bestWinStreak }, ...]
+
 POST /v2/rpc/delete_user_data
+  - Deletes user account and all associated data (wins, losses, streaks)
+  - Returns: { success: true }
+  - Note: Username becomes available for reuse after deletion
 ```
 
 ### WebSocket API
 
 **Connect:**
+
 ```
 wss://api.yourdomain.com/ws?token=<auth_token>
 ```
 
 **Send Move:**
+
 ```javascript
 socket.send({
   match_data_send: {
     match_id: "...",
-    op_code: 1,  // MAKE_MOVE
-    data: { position: 4 }
-  }
+    op_code: 1, // MAKE_MOVE
+    data: { position: 4 },
+  },
 });
 ```
 
 **Receive State Update:**
+
 ```javascript
 socket.onmessage = (event) => {
   // op_code: 2 (STATE_UPDATE)
@@ -592,6 +720,7 @@ socket.onmessage = (event) => {
 ### Backend Issues
 
 **Nakama won't start:**
+
 ```bash
 # Check logs
 docker-compose logs postgres
@@ -603,6 +732,7 @@ docker-compose up
 ```
 
 **Module not loading:**
+
 ```bash
 # Rebuild TypeScript
 cd modules
@@ -612,6 +742,7 @@ docker-compose restart nakama
 ```
 
 **WebSocket connection fails:**
+
 ```bash
 # Check Nginx config
 nginx -t
@@ -626,13 +757,59 @@ curl http://localhost:7350/v2/healthcheck
 ### Frontend Issues
 
 **Mixed content error:**
+
 - Ensure `VITE_NAKAMA_SSL=true` in production
 - Backend must use HTTPS
 
 **Cannot connect:**
+
 - Check CORS in `data/local.yml`
 - Verify firewall allows port 443
 - Test backend directly: `curl https://api.yourdomain.com/v2/healthcheck`
+
+## Production Logging
+
+### Logging Strategy
+
+**Development:**
+
+- Full console logging enabled for debugging
+- All game events, matchmaking, and RPC calls logged
+- Streak updates and leaderboard changes logged
+
+**Production:**
+
+- Client-side: Production-safe logger (only errors logged in production)
+- Server-side: Nakama logger with appropriate log levels
+- Sensitive information (tokens, passwords) never logged
+
+### Log Locations
+
+**Server Logs:**
+
+```bash
+# View Nakama logs
+docker-compose logs -f nakama
+
+# View PostgreSQL logs
+docker-compose logs -f postgres
+
+# View Nginx logs
+tail -f /var/log/nginx/access.log
+tail -f /var/log/nginx/error.log
+```
+
+**Client Logs:**
+
+- Browser console (development only)
+- Production: Only errors logged to console
+- User-facing feedback via toast notifications
+
+### Log Levels
+
+- **INFO:** Game events, matchmaking, streak updates
+- **WARN:** Non-critical errors (e.g., missing streak data)
+- **ERROR:** Critical errors (e.g., database failures, RPC errors)
 
 ## Security Considerations
 
@@ -646,17 +823,24 @@ curl http://localhost:7350/v2/healthcheck
 - [ ] Keep SSL certificates renewed (Certbot auto-renewal)
 - [ ] Regular backups of PostgreSQL data
 - [ ] Monitor server resources (CPU, RAM, disk)
+- [ ] Console access restricted via Nginx (not exposed on port 7351)
 
 ### Current Security Status
 
 **Implemented:**
+
 - SSL/TLS encryption (Let's Encrypt)
 - Server-authoritative game logic (prevents cheating)
 - CORS restrictions (only whitelisted frontend)
 - Input validation (all moves validated)
 - SQL injection protection (Nakama ORM)
+- Production-safe logging (no sensitive data in logs)
+- Graceful error handling with user-friendly messages
+- Account deletion with proper cleanup (username reuse enabled)
+- Console access via HTTPS reverse proxy (not exposed on raw port)
 
 **For Production Enhancement:**
+
 - Rate limiting (prevent spam/DDoS)
 - IP-based throttling
 - Session management improvements
@@ -665,12 +849,17 @@ curl http://localhost:7350/v2/healthcheck
 ## Performance Optimization
 
 **Current Setup:**
+
 - Handles ~100 concurrent players on $6 droplet
 - WebSocket keeps persistent connections
 - PostgreSQL indexes on leaderboard queries
 - Nginx caching for static health checks
+- Efficient streak storage using Nakama storage objects (key-value)
+- Leaderboard queries optimized with streak data retrieval
+- Client-side state management prevents unnecessary re-renders
 
 **Scaling Options:**
+
 - Vertical: Upgrade to larger droplet
 - Horizontal: Multiple Nakama nodes with load balancer
 - Database: Managed PostgreSQL (DigitalOcean DBaaS)
@@ -679,6 +868,7 @@ curl http://localhost:7350/v2/healthcheck
 ## Cost Breakdown
 
 **Monthly Costs:**
+
 - DigitalOcean Droplet: $6-12/month
 - Vercel (Frontend): Free tier
 - SSL Certificate: Free (Let's Encrypt)
