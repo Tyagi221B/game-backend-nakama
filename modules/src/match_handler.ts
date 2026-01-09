@@ -174,6 +174,23 @@ let matchLoop: nkruntime.MatchLoopFunction<GameState> = function (
           );
           break;
 
+        // WebRTC Voice Chat Signaling - Broadcast to all (client filters own messages)
+        case OpCode.WEBRTC_OFFER:
+          logger.info("[VOICE] WebRTC offer received from " + message.sender.username + ", broadcasting to all");
+          // Broadcast to everyone - client will filter out own messages
+          dispatcher.broadcastMessage(OpCode.WEBRTC_OFFER, message.data);
+          break;
+
+        case OpCode.WEBRTC_ANSWER:
+          logger.info("[VOICE] WebRTC answer received from " + message.sender.username + ", broadcasting to all");
+          dispatcher.broadcastMessage(OpCode.WEBRTC_ANSWER, message.data);
+          break;
+
+        case OpCode.WEBRTC_ICE_CANDIDATE:
+          logger.info("[VOICE] ICE candidate received from " + message.sender.username + ", broadcasting to all");
+          dispatcher.broadcastMessage(OpCode.WEBRTC_ICE_CANDIDATE, message.data);
+          break;
+
         default:
           logger.warn("� Unknown opCode: " + message.opCode);
       }

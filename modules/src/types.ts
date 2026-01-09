@@ -36,4 +36,9 @@ interface GameState {
 const enum OpCode {
   STATE_UPDATE = 1,    // Server → Client: "Here's the updated game state"
   MAKE_MOVE = 2,       // Client → Server: "I want to make a move at position X"
+
+  // WebRTC Voice Chat Signaling
+  WEBRTC_OFFER = 3,    // Client → Client (via Server): "Here's my WebRTC connection offer"
+  WEBRTC_ANSWER = 4,   // Client → Client (via Server): "Here's my WebRTC connection answer"
+  WEBRTC_ICE_CANDIDATE = 5, // Client → Client (via Server): "Here's a network route candidate"
 }
