@@ -1,0 +1,43 @@
+name: Deploy to Digital Ocean
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Droplet
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          port: 22
+          script: |
+            echo "🚀 Starting deployment..."
+            cd ${{ secrets.DROPLET_PROJECT_PATH }}
+
+            echo "📥 Pulling latest code..."
+            git pull origin main
+
+            echo "🔨 Building server modules..."
+            cd modules
+            npm install
+            npm run build
+
+            echo "🐳 Restarting Docker containers..."
+            cd ..
+            docker-compose restart
+
+            echo "✅ Deployment complete!"
+            docker-compose ps
+
+      - name: Deployment Status
+        if: success()
+        run: echo "✅ Deployment successful!"
